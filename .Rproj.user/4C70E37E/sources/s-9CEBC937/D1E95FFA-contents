@@ -1,0 +1,332 @@
+###########################################################################
+##########################  FAD PAPER R SCRIPT ############################
+###########################################################################
+
+
+## Section 1 initial data download
+###########################################################################
+
+## download and filter peakaDAT database
+## can skip this section if just re-running script
+tmpf <- tempfile(fileext = ".csv")
+test <- download.file(paste0("https://docs.google.com/spreadsheets/d/e/2PACX-1vSO-",
+                             "ivIULOs5WOVwI1A0n-QPkgLiQ5bG8oTy4_NJJGQbqU15dVA5f0",
+                             "oFXa6E7Op43dZz4j5T4-lWUTY/pub?gid=2135385965&single=",
+                             "true&output=csv"), destfile = tmpf, quiet = TRUE)
+if(test != 0) stop("Error 1")
+x <- read.csv(tmpf, stringsAsFactors = FALSE)
+x$date <- as.Date(x$date)
+keeps <- x$flag %in% c(0L, 4L, 5L) ## remove weight and length discrepancies
+x <- x[keeps, ] 
+# remove all trips containing NAs
+x$gear <- match(x$gear, c("GN", "HL", "LL", "SG", "CN", "MC", "BS", "SN", "TP"))
+discards <- is.na(x$station) | is.na(x$hab) | is.na(x$gear)| 
+  is.na(x$weight_g) | is.na(x$trip_effort) #logical
+discards <- x$Trip_ID[discards] #indices
+discards <- x$Trip_ID %in% discards #logical
+x <- x[!discards, ] 
+## trip_effort = manhours
+## rel_effort = pob
+## trip_hours = duration
+x$KG <- x$weight_g/1000
+x <- x[x$station %in% c(1, 4, 5, 10), ] #7658
+x <- x[x$date >= as.Date("2017-04-01") & x$date < as.Date("2018-04-01"), ] #4172
+sum(x$hab == 4) #971
+x$hab[x$hab == 5] <- 2 # 40 x traditional FAD records,  lump in with FAD
+x$hab[x$hab >= 3] <- 3
+x <- x[-(nrow(x)),] # test record
+write.csv(x, file = "~/Dropbox/East_Timor/Worldfish/FAD_paper/FAD_data.csv", 
+          row.names = FALSE)
+saveRDS(x, file = "~/Dropbox/East_Timor/Worldfish/FAD_paper/FAD_data.rds")
+
+
+
+
+## Section 2 - make tables and plots for MS 
+###########################################################################
+
+## read in table
+x <- readRDS("~/Dropbox/East_Timor/Worldfish/FAD_paper/FAD_data.rds")
+sites <- c("Adara", "Beloi", "Biqueli", "Vemasse", "Adarai",
+           "Uaroana", "Com", "Tutuala", "Ililai", "Biacou",
+           "Tolurika","Atekru","Berao","Iliana",
+           "Fatu'u","Doru","Raiketa","Maquer","Lore")
+municipios <- c(10, 10, 10, 9, 1, 10, 2, 2, 2, 5, rep(10,8), 2)
+habs <- c("Reef/Ahu ruin","FAD/Rompun","Deep/Tasi kle'an","Beach/Tasi ninin",
+          "Traditional FAD/Rompun bamboo","Mangrove/Aiparapa","Gleaning/Meti")
+gears <- c("Gillnet/Redi","Handline/Hakail","Longline/Hakail naruk",
+           "Spear/Kilat","Cast net/Dai", "Manual/Meti",
+           "Beach seine/Redi tasi ninin","Seine net/Lampara","Trap/Bubur")
+
+
+## calculate diversity indices by site
+spp <- aggregate(x[c("nfish")], by = x[c("station", "species")], sum, drop = FALSE)
+spp <- spp[-(1:4), ] ## remove zero catch records
+spp$nfish[is.na(spp$nfish)] <- 0L
+X <- matrix(spp$nfish, nrow = 4)
+colnames(X) <- unique(spp$species)
+rownames(X) <- sites[unique(spp$station)]
+X <- X[, seq(1, ncol(X) - 2)]
+X <- X[order(rownames(X)), ]
+library(vegan)
+H <- diversity(X) # Shannon's H
+# Adara    Adarai    Beacou   Vemasse 
+# 1.2771349 0.4046105 0.9956470 1.1632497 
+S <- specnumber(X) # richness
+# Adara  Adarai  Beacou Vemasse 
+# 31      21      46      15 
+J <- H/log(S) # evenness
+# Adara    Adarai    Beacou   Vemasse 
+# 0.3719102 0.1328979 0.2600523 0.4295525
+div_site <- cbind(H, J)
+colnames(div_site) <- c("Shannon", "Evenness")
+
+
+## calculate diversity indices for site x habitat
+spp <- aggregate(x[c("nfish", "KG")], by = x[c("station", "hab", "species")], 
+                 sum, drop = FALSE)
+discards <- spp$species %in% c(0, 300, 999)
+spp <- spp[!discards, ]
+spp$nfish[is.na(spp$nfish)] <- 0L
+spp$KG[is.na(spp$KG)] <- 0
+X <- matrix(spp$nfish, nrow = 12)
+colnames(X) <- unique(spp$species)
+rownames(X) <- paste0(rep(sites[unique(spp$station)], 3), "aa_", 
+                      rep(c("Reef", "FAD", "Other"), each = 4))
+X <- X[order(rownames(X)), ]
+rownames(X) <- sub("aa_", "_", rownames(X))
+Y <- aggregate(X, by = list(as.factor(rep(c("FAD", "Other", "Reef"), 4))), sum)[-1]
+rownames(Y) <- c("Total_FAD", "Total_Other", "Total_Reef")
+X <- rbind(X, Y)
+H <- diversity(X) # shannon
+S <- specnumber(X) # richness
+J <- H/log(S) # evenness
+div_sitexhab <- cbind(H, J)
+div_sitexhab <- div_sitexhab[S > 0, ]
+colnames(div_sitexhab) <- c("Diversity", "Evenness")
+div_sitexhab <- round(div_sitexhab, 2)
+
+
+## aggregate dataset by trip
+z <- aggregate(x[c("date", "fisher","trip_hours", "trip_effort", "station", 
+                     "hab", "gear", "btype", "nfish")], 
+               by = list(x$Trip_ID), "[", 1) #3277 trips
+colnames(z)[1] <- "Trip_ID"
+z$KG <- aggregate(x["KG"], by = list(x$Trip_ID), sum)[, 2]
+z$trip_effort[z$trip_effort == 0] <- 3
+z$CPUE <- z$KG/z$trip_effort
+z$NPUE <- z$nfish/z$trip_effort
+z$hab <- as.factor(c("Reef", "FAD", "Other")[z$hab])
+z$btype <- as.factor(c("Canoe", "Motor")[z$btype])
+z$station <- as.factor(sites[z$station])
+
+
+## summary stats for nfish, nKG, ntrips for table 3
+ntrips <- aggregate(z["Trip_ID"], by = z[c("station", "hab")], length)
+nfish <- aggregate(z[c("nfish", "KG")], by = z[c("station", "hab")], sum)
+ntrips <- merge(ntrips, nfish)
+colnames(ntrips)[colnames(ntrips) == "Trip_ID"] <- "ntrips"
+rownames(ntrips) <- paste0(ntrips$station, "aa_", ntrips$hab)
+ntrips <- ntrips[order(rownames(ntrips)), ]
+rownames(ntrips) <- sub("aa_", "_", rownames(ntrips))
+tots <- aggregate(ntrips[c("ntrips", "nfish", "KG")], by = ntrips["hab"], sum)
+tots <- cbind("Total", tots)
+colnames(tots)[1] <- "station"
+ntrips <- rbind(ntrips, tots)
+ntrips <- cbind(ntrips, div_sitexhab)
+rownames(ntrips) <- rownames(div_sitexhab)
+ntrips$KG <- round(ntrips$KG)
+ntrips
+#               station   hab ntrips  nfish    KG Diversity Evenness
+# Adara_FAD       Adara   FAD    485  18480  6413      1.24     0.37
+# Adara_Other     Adara Other      7    163    41      1.05     0.96
+# Adara_Reef      Adara  Reef     32    645   220      0.87     0.34
+# Adarai_FAD     Adarai   FAD    193  10794  1184      0.17     0.07
+# Adarai_Other   Adarai Other    682  22081  2175      0.47     0.16
+# Beacou_FAD     Beacou   FAD     61   2610   411      0.82     0.37
+# Beacou_Other   Beacou Other    669  69338  4675      0.75     0.21
+# Beacou_Reef    Beacou  Reef     92   1354   802      2.48     0.75
+# Vemasse_FAD   Vemasse   FAD     51  59098  7900      0.08     0.11
+# Vemasse_Other Vemasse Other   1005  47528  2861      1.30     0.48
+# Total_FAD       Total   FAD    790  90982 15908      0.98     0.27
+# Total_Other     Total Other   2363 139110  9753      1.34     0.35
+# Total_Reef      Total  Reef    124   1999  1022      2.40     0.69
+
+
+## boxplot for manuscript
+library(ggplot2)
+library(scales)
+tmp <- z
+tmp$CPUE <- tmp$CPUE + 1 ## this is correct in axis labels
+tmp <- tmp[!(tmp$station == "Adara" & tmp$hab == "Other"), ] # only 7 records
+colnames(tmp)[colnames(tmp) == "hab"] <- "Habitat" # for legend title
+
+p <- ggplot(tmp, aes(x=station, y=CPUE, fill=Habitat)) +
+  geom_boxplot(varwidth = TRUE, show.legend = TRUE, #fill = rep(c("blue", "green", "red", "yellow", "pink"), 1),
+               position=position_dodge2(preserve = "single", padding = -0.3)) +
+  scale_y_log10(breaks = c(1, 2, 3, 4, 5, 6, 11, 21, 31, 41, 51), 
+                labels = c("0","1","2","3","4","5","10", "20","30","40","50")) +
+  theme(legend.title=element_blank(), legend.text=element_text(size=6)) +
+  ylab("CPUE (KG/hour)\n") +
+  xlab("") +
+  theme_bw()
+
+
+p
+setEPS()
+postscript("~/Desktop/FAD_boxplot.eps", width = 6.93, height = 4, family = "Times")
+p
+dev.off()
+
+
+## Table 2 for MS
+meancatch <- aggregate(z[c("CPUE", "trip_hours")], by = z["station"], mean)
+totcatch <- aggregate(z[c("KG", "nfish", "trip_effort")], by = z["station"], sum)
+totboats <- data.frame(motors = c(3, 12, 41, 9), canoes = c(12, 60, 8, 23))
+table2 <- cbind(meancatch, totcatch[-1], totboats)
+motorcatch <- table2$motors * table2$CPUE * 15.3 * 10 * 12 
+## 10 fisher-hours per trip, 15 trips per month, 12 months
+canoecatch <- table2$canoes * table2$CPUE * 8.2 * 4 * 12 
+## 4 fisher-hours per trip, 8.2 trips per month, 12 months
+table2$total <- (motorcatch + canoecatch)/1000 ## convert to T
+table2 <- cbind(table2, div_site)
+table2 <- table2[, c(1, 10, 11, 5, 4, 6, 3, 2, 7, 8, 9)]
+table2$Shannon <- round(table2$Shannon, 2)
+table2$Evenness <- round(table2$Evenness, 2)
+table2$KG <- round(table2$KG, 0)
+table2$trip_effort <- round(table2$trip_effort, 0)
+table2$trip_hours <- round(table2$trip_hours, 2)
+table2$CPUE <- round(table2$CPUE, 2)
+table2$total <- round(table2$total, 1)
+table2
+# station Shannon Evenness  nfish    KG trip_effort trip_hours CPUE motors canoes total
+# Adara    1.28     0.37  19288  6675        2729       2.50 2.78      3     12  28.4
+# Adarai    0.40     0.13  32875  3360        3210       3.21 0.97     12     60  44.3
+# Beacou    1.00     0.26  73302  5888        7367       4.32 0.92     41      8  72.5
+# Vemasse    1.16     0.43 106626 10761        5669       3.97 0.94      9     23  24.1
+write.csv(table2, file = "~/Dropbox/East_Timor/Worldfish/FAD_paper/site_table.csv", 
+          row.names = FALSE)
+
+
+## CPUE by habitat
+fm2 <- glmer(round(CPUE) ~ hab + (1 | station), data = z, family = poisson)
+# AIC 13905.698
+effects_fm2 <- effects::effect("hab", fm2, confidence.level = 0.95)
+ests_fm2 <- effects_fm2$fit
+confs_fm2 <- with(effects_fm2, cbind(lower, upper))
+out_fm2 <- cbind(ests_fm2, confs_fm2)
+colnames(out_fm2) <- c("CPUE", "CPUE_lower95", "CPUE_upper95")
+rownames(out_fm2) <- effects_fm2$variables$hab$levels
+out_fm2 <- round(exp(out_fm2), 2)
+out_fm2
+
+
+## Table 3 for MS
+out <- data.frame(site = character(0), CPUE = numeric(0), 
+                  CPUE_lower95 = numeric(0), CPUE_upper95 = numeric(0),
+                  NPUE = numeric(0), NPUE_lower95 = numeric(0), 
+                  NPUE_upper95 = numeric(0),
+                  success = numeric(0), success_lower95 = numeric(0), 
+                  success_upper95 = numeric(0),
+                  stringsAsFactors = FALSE)
+for(site in levels(z$station)){
+  sitei <- z[z$station == site, ] 
+  ## kg per unit effort
+  CPUE <- glm(round(CPUE) ~ hab, data = sitei, family = poisson)
+  effects_CPUE <- effects::effect("hab", CPUE, confidence.level = 0.95)
+  ests_CPUE <- effects_CPUE$fit
+  confs_CPUE <- with(effects_CPUE, cbind(lower, upper))
+  out_CPUE <- cbind(ests_CPUE, confs_CPUE)
+  colnames(out_CPUE) <- c("CPUE", "CPUE_lower95", "CPUE_upper95")
+  rownames(out_CPUE) <- effects_CPUE$variables$hab$levels
+  out_CPUE <- round(exp(out_CPUE), 2)
+  ## nfish per unit effort
+  NPUE <- glm(round(NPUE) ~ hab, data = sitei, family = poisson)
+  effects_NPUE <- effects::effect("hab", NPUE, confidence.level = 0.95)
+  ests_NPUE <- effects_NPUE$fit
+  confs_NPUE <- with(effects_NPUE, cbind(lower, upper))
+  out_NPUE <- cbind(ests_NPUE, confs_NPUE)
+  colnames(out_NPUE) <- c("NPUE", "NPUE_lower95", "NPUE_upper95")
+  rownames(out_NPUE) <- effects_NPUE$variables$hab$levels
+  out_NPUE <- round(exp(out_NPUE), 2)
+  ## success rate
+  success <- glm(as.logical(nfish) ~ hab, data = sitei, family = binomial)
+  effects_success <- effects::effect("hab", success, confidence.level = 0.95)
+  ests_success <- effects_success$fit
+  confs_success <- with(effects_success, cbind(lower, upper))
+  out_success <- cbind(ests_success, confs_success)
+  colnames(out_success) <- c("success", "success_lower95", "success_upper95")
+  rownames(out_success) <- effects_success$variables$hab$levels
+  out_success <- round(exp(out_success)/(exp(out_success) + 1), 3) # inverse logit function
+  ## join together
+  out <- rbind(out, cbind(site, out_CPUE, out_NPUE, out_success))
+}
+# all data combined
+CPUE <- glmer(round(CPUE) ~ hab + (1 | station), data = z, family = poisson)
+#AIC: 13905.698
+effects_CPUE <- effects::effect("hab", CPUE, confidence.level = 0.95)
+ests_CPUE <- effects_CPUE$fit
+confs_CPUE <- with(effects_CPUE, cbind(lower, upper))
+out_CPUE <- cbind(ests_CPUE, confs_CPUE)
+colnames(out_CPUE) <- c("CPUE", "CPUE_lower95", "CPUE_upper95")
+rownames(out_CPUE) <- effects_CPUE$variables$hab$levels
+out_CPUE <- round(exp(out_CPUE), 2)
+## nfish per unit effort
+NPUE <- glmer(round(NPUE) ~ hab + (1 | station), data = z, family = poisson)
+NPUE #AIC 76744.00
+effects_NPUE <- effects::effect("hab", NPUE, confidence.level = 0.95)
+ests_NPUE <- effects_NPUE$fit
+confs_NPUE <- with(effects_NPUE, cbind(lower, upper))
+out_NPUE <- cbind(ests_NPUE, confs_NPUE)
+colnames(out_NPUE) <- c("NPUE", "NPUE_lower95", "NPUE_upper95")
+rownames(out_NPUE) <- effects_NPUE$variables$hab$levels
+out_NPUE <- round(exp(out_NPUE), 2)
+## success rate
+success <- glmer(as.logical(nfish) ~ hab + (1 | station), data = z, family = binomial)
+effects_success <- effects::effect("hab", success, confidence.level = 0.95)
+ests_success <- effects_success$fit
+confs_success <- with(effects_success, cbind(lower, upper))
+out_success <- cbind(ests_success, confs_success)
+colnames(out_success) <- c("success", "success_lower95", "success_upper95")
+rownames(out_success) <- effects_success$variables$hab$levels
+out_success <- round(exp(out_success)/(exp(out_success) + 1), 3) # inverse logit function
+## join tables
+site <- "Total"
+out <- rbind(out, cbind(site, out_CPUE, out_NPUE, out_success))
+hab <- sub("[[:digit:]]", "", rownames(out))
+out <- cbind(hab, out)
+rownames(out) <- NULL
+out <- out[c(2, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11)]
+rownames(ntrips) <- NULL
+ntrips <- ntrips[-(1:2)]
+out <- cbind(out, ntrips)
+## format confidence intervals for for MS
+table3 <- out
+table3 <- out[c(1:3, 6, 9, 12:16)]
+table3$CPUE <- paste0(out$CPUE, " (", out$CPUE_lower95, "/", out$CPUE_upper95, ")")
+table3$NPUE <- paste0(out$NPUE, " (", out$NPUE_lower95, "/", out$NPUE_upper95, ")")
+table3$success <- paste0(out$success, " (", out$success_lower95, "/", out$success_upper95, ")")
+table3$success <- gsub("0/NaN", "-/-", table3$success)
+table3
+write.csv(table3, file = "~/Dropbox/East_Timor/Worldfish/FAD_paper/FAD_table3.csv", 
+          row.names = FALSE)
+
+######################################  END  ###############################
+
+colnames(z)
+z$month <- as.Date(sub("-..$", "-01", z$date))
+y <- aggregate(z["trip_hours"], by = z[c("month", "station")], sum, drop = F)
+y$trip_hours[is.na(y$trip_hours)] <- 0
+#y$month <- as.factor(y$month)
+#y$station
+#tmp <- y
+
+p <- ggplot(y, aes(x=month, y=trip_hours, colour=station)) +
+  geom_line() +
+  #theme(legend.title=element_blank(), legend.text=element_text(size=6)) +
+  ylab("Total trip hours") +
+  xlab("") +
+  scale_x_date() +
+  theme_bw()
+p
+
