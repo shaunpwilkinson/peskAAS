@@ -1,7 +1,7 @@
-### peskaPARSER script to download landings records from KOBO and append to googlesheet
+### peskaPARSE.R script to download landings records from KOBO and append to googlesheet
 ### at daily intervals.
 
-### need two-line text file with KOBO credentials and .httr-oauth file for googlesheet edit acces
+### Note: need text file with KOBO credentials and .httr-oauth file for googlesheet edit access
 ### stored in same folder as this script
 
 ### CRON job setup instructions:
@@ -43,6 +43,12 @@ message("Retrieving landings data from Kobo API")
 id <-  135272 # new landings data
 URL <- paste0("https://kc.humanitarianresponse.info/api/v1/data/", id, ".xlsx")
 kobocreds <- scan("KoBo-auth.txt", what = "", sep = "\n")
+kobocreds <- kobocreds[!grepl("^#", kobocreds)]
+kobocreds <- kobocreds[grep(":", kobocreds)[1]]
+stopifnot(length(kobocreds) == 1L)
+kobocreds <- gsub(" ", "", kobocreds)
+kobocreds <- strsplit(kobocreds, split = ":")[[1]][1:2]
+stopifnot(length(kobocreds) == 2L)
 z <- httr::GET(URL, httr::authenticate(kobocreds[1], kobocreds[2]))
 httr::stop_for_status(z)
 tmpz <- tempfile(fileext = ".xlsx")
