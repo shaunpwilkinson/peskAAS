@@ -61,7 +61,8 @@ shinyUI(fluidPage(
            br(),
            dateRangeInput('dateRange',
                           label = "Date range",
-                          start = as.Date("2016-09-01"), end = lubridate::floor_date(Sys.Date(), unit = "month"),
+                          start = lubridate::floor_date(Sys.Date() - lubridate::years(1), unit = "month") , 
+                          end = lubridate::floor_date(Sys.Date(), unit = "month") - lubridate::days(1),
                           min = as.Date("2016-09-01"), max = lubridate::floor_date(Sys.Date(), unit = "month"),
                           separator = " - ", format = "dd-M-yyyy",
                           startview = "year", language = "en-AU"#, weekstart = 1
@@ -85,7 +86,7 @@ shinyUI(fluidPage(
            actionLink("selectall_site", "select/deselect all"), 
            br(),
            br(),
-           sliderInput("smoothen", label = "Smoothness", min = 0, max = 1, value = 0.8), 
+           sliderInput("smoothen", label = "Smoothness", min = 0, max = 1, value = 0), 
            br()
     ),
     column(8, 

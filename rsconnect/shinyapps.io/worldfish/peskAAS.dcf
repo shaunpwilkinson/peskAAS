@@ -5,8 +5,6 @@ account: worldfish
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 513861
-bundleId: 1703676
+bundleId: 2048589
 url: https://worldfish.shinyapps.io/peskAAS/
-when: 1542336152.75471
-asMultiple: FALSE
-asStatic: FALSE
+when: 1556595602.46052

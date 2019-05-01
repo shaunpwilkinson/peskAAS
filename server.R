@@ -6,13 +6,15 @@ library(scales)
 library(zoo)
 
 shinyServer(function(input, output, session){
-  tmpf <- tempfile(fileext = ".csv")
-  test <- download.file(paste0("https://docs.google.com/spreadsheets/d/e/2PACX-1vSO-",
-                               "ivIULOs5WOVwI1A0n-QPkgLiQ5bG8oTy4_NJJGQbqU15dVA5f0",
-                               "oFXa6E7Op43dZz4j5T4-lWUTY/pub?gid=2135385965&single=",
-                               "true&output=csv"), destfile = tmpf, quiet = TRUE)
-  if(test != 0) stop("Error 1")
-  x <- read.csv(tmpf, stringsAsFactors = FALSE)
+  # tmpf <- tempfile(fileext = ".csv")
+  # test <- download.file(paste0("https://docs.google.com/spreadsheets/d/e/2PACX-1vSO-",
+  #                              "ivIULOs5WOVwI1A0n-QPkgLiQ5bG8oTy4_NJJGQbqU15dVA5f0",
+  #                              "oFXa6E7Op43dZz4j5T4-lWUTY/pub?gid=2135385965&single=",
+  #                              "true&output=csv"), destfile = tmpf, quiet = TRUE)
+  # if(test != 0) stop("Error 1")
+  # x <- read.csv(tmpf, stringsAsFactors = FALSE)
+  
+  x <- readRDS("data/backup-2019-04-03.rds")
   x$date <- as.Date(x$date)
   keeps <- x$flag %in% c(0L, 4L, 5L) ## weight and length discrepancies
   x <- x[keeps, ] 
@@ -26,6 +28,9 @@ shinyServer(function(input, output, session){
   x <- x[!discards, ] 
   discards <- x$date >= lubridate::floor_date(Sys.Date(), unit = "day")
   x <- x[!discards, ]
+  ### Archive data once per year
+  ### z <- test[startsWith(test$date, "2016"), ]
+  #saveRDS(z, file = "data/archived/2016.rds")
   sites <- c("Adara", "Beloi", "Biqueli", "Vemasse", "Adarai",
              "Uaroana", "Com", "Tutuala", "Ililai", "Beacou",
              "Tolurika","Atekru","Berao","Iliana",
