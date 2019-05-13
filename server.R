@@ -1,7 +1,9 @@
 ################################################################################
 library(shiny)
+library(RMySQL)
 library(lubridate)
 library(ggplot2)
+library(RColorBrewer)
 library(scales)
 library(zoo)
 
@@ -13,48 +15,67 @@ shinyServer(function(input, output, session){
   #                              "true&output=csv"), destfile = tmpf, quiet = TRUE)
   # if(test != 0) stop("Error 1")
   # x <- read.csv(tmpf, stringsAsFactors = FALSE)
+  # peskaDAT = RMySQL::dbConnect(RMySQL::MySQL(), user='sql12291139', password='R1fDe1QDB6', 
+  #                              dbname='sql12291139', host='sql12.freemysqlhosting.net', 
+  #                              port=3306)
+  peskaDAT = RMySQL::dbConnect(RMySQL::MySQL(), user='wilko_sql1229113', password='R1fDe1QDB6', 
+                               dbname='wilko_peskaDAT', host='johnny.heliohost.org', port=3306)
   
-  x <- readRDS("data/backup-2019-04-03.rds")
+  lndgs <- RMySQL::dbReadTable(peskaDAT, "landings")
+  trps <- RMySQL::dbReadTable(peskaDAT, "trips")
+  munis <- RMySQL::dbReadTable(peskaDAT, "municipalities")
+  stns <- RMySQL::dbReadTable(peskaDAT, "stations")
+  spcs <-  RMySQL::dbReadTable(peskaDAT, "species")
+  dbDisconnect(peskaDAT)
+  x <- merge(lndgs, trps, by = "trip_id")
+  
+  # x <- readRDS("data/backup-2019-04-03.rds")
   x$date <- as.Date(x$date)
-  keeps <- x$flag %in% c(0L, 4L, 5L) ## weight and length discrepancies
+  keeps <- x$flag.x %in% c(0L, 4L, 5L) ## weight and length discrepancies
   x <- x[keeps, ] 
   # remove all rows whose parent trips contain NAs
   x$gear <- match(x$gear, c("GN", "HL", "LL", "SG", "CN", "MC", "BS", "SN", "TP"))
-  discards <- is.na(x$station) | is.na(x$hab) | is.na(x$gear)| 
+  discards <- is.na(x$station) | is.na(x$habitat) | is.na(x$gear)| 
     is.na(x$weight_g) | is.na(x$trip_effort) #logical
   ## must remove entire trip's data
-  discards <- x$Trip_ID[discards] #indices
-  discards <- x$Trip_ID %in% discards #logical
+  discards <- x$trip_id[discards] #indices
+  discards <- x$trip_id %in% discards #logical
   x <- x[!discards, ] 
   discards <- x$date >= lubridate::floor_date(Sys.Date(), unit = "day")
   x <- x[!discards, ]
-  ### Archive data once per year
-  ### z <- test[startsWith(test$date, "2016"), ]
-  #saveRDS(z, file = "data/archived/2016.rds")
-  sites <- c("Adara", "Beloi", "Biqueli", "Vemasse", "Adarai",
-             "Uaroana", "Com", "Tutuala", "Ililai", "Beacou",
-             "Tolurika","Atekru","Berao","Iliana",
-             "Fatu'u","Doru","Raiketa","Maquer","Lore")
-  municipios <- c(10, 10, 10, 9, 1, 10, 2, 2, 2, 5, rep(10,8), 2)
-  habs <- c("Reef/Ahu ruin","FAD/Rompun","Deep/Tasi kle'an","Beach/Tasi ninin",
+  x <- x[x$date > as.Date("2016-09-01"), ]
+
+  # sites <- c("Adara", "Beloi", "Biqueli", "Vemasse", "Adarai",
+  #            "Uaroana", "Com", "Tutuala", "Ililai", "Beacou",
+  #            "Tolurika","Atekru","Berao","Iliana",
+  #            "Fatu'u","Doru","Raiketa","Maquer","Lore")
+  
+  sites <- c("Viqueque","Lautem","Manatuto","Liquica","Bobonaro","Covalima",
+             "Manufahi","Ainaro","Baucau","Dili","Oe-Cusse", "Atauro")   
+  # municipios <- c(10, 10, 10, 9, 1, 10, 2, 2, 2, 5, rep(10,8), 2)
+  # municipios <- munis$municipio
+  
+  habitats <- c("Reef/Ahu ruin","FAD/Rompun","Deep/Tasi kle'an","Beach/Tasi ninin",
             "Traditional FAD/Rompun bamboo","Mangrove/Aiparapa","Gleaning/Meti")
+  
   gears <- c("Gillnet/Redi","Handline/Hakail","Longline/Hakail naruk","Spear/Kilat","Cast net/Dai",
-             "Manual/Meti","Beach seine/Redi tasi ninin","Seine net/Lampara","Trap/Bubur")
+             "Manual/Meti","Beach seine/Redi tasi ninin", "Seine net/Lampara","Trap/Bubur")
+  boat_types <- c("Canoe", "Motor")
   
   ## number of boats by municipio
-  totdata <- readRDS("data/totdata.rds")
-  td <- cbind(totdata[1], totdata[4], apply(totdata[5:7], 1, sum)) 
-  colnames(td) <- c("municipio", "ncanoes", "nmotors")
-  rownames(td) <- NULL
+  #totdata <- readRDS("data/totdata.rds")
+  # td <- cbind(munis[1], munis[4], apply(munis[5:7], 1, sum)) 
+  # colnames(td) <- c("municipio", "ncanoes", "nmotors")
+  # rownames(td) <- NULL
   ## convert to stations
 
   observe({
-    if(input$selectall_hab == 0){
+    if(input$selectall_habitat == 0){
       return(NULL)
-    }else if(input$selectall_hab %% 2 == 0){
-      updateCheckboxGroupInput(session, "hab", choices=habs,selected=habs)
+    }else if(input$selectall_habitat %% 2 == 0){
+      updateCheckboxGroupInput(session, "habitat", choices=habitats,selected=habitats)
     }else{
-      updateCheckboxGroupInput(session, "hab", choices=habs)
+      updateCheckboxGroupInput(session, "habitat", choices=habitats)
     }
   })
   observe({
@@ -64,6 +85,15 @@ shinyServer(function(input, output, session){
       updateCheckboxGroupInput(session, "gear", choices=gears,selected=gears)
     }else{
       updateCheckboxGroupInput(session, "gear", choices=gears)
+    }
+  })
+  observe({
+    if(input$selectall_boat_type == 0){
+      return(NULL)
+    }else if(input$selectall_boat_type %% 2 == 0){
+      updateCheckboxGroupInput(session, "boat_type", choices=boat_types, selected=boat_types)
+    }else{
+      updateCheckboxGroupInput(session, "boat_type", choices=boat_types)
     }
   })
   observe({
@@ -80,81 +110,49 @@ shinyServer(function(input, output, session){
     x$date <- as.character(x$date)
     x$KG <- x$weight_g/1000
     ## hours is really manhours
-    x <- x[c("Trip_ID", "date", "species", "rel_effort", "trip_effort", "station", "hab", "gear", "btype", "KG")]
-    colnames(x) <- c("ID","Date", "species", "pob", "hours", "station", "hab", "gear", "btype", "KG")
+    x <- x[c("trip_id", "date", "species", "rel_effort", "trip_effort", "station", "habitat", "gear", "boat_type", "KG")]
+    colnames(x) <- c("ID","Date", "species", "pob", "hours", "station", "habitat", "gear", "boat_type", "KG")
+    ## get rid eventually
     x$Month <- lubridate::floor_date(as.Date(x$Date), unit = "month")
     x$Month <- as.factor(x$Month)
-    
-    ## work out national catch for specified date range here
-    ## fisrt aggregate trip hours
-    tmp <- aggregate(x[c("Date", "pob", "hours", "station", "hab", "gear", "btype","Month")], 
-                     by = list(x$ID), "[", 1) 
-    tmp$KG <- aggregate(x["KG"], by = list(x$ID), sum)[, 2]
-    uepertrip_canoe <- median(tmp$hours[tmp$btype == 1]) #4
-    uepertrip_motor <- median(tmp$hours[tmp$btype == 2]) #10
-    uepertrip_shore <- median(tmp$hours[tmp$btype == 3]) #3
-    
-    tripspermonth_canoe <- 8.2
-    tripspermonth_motor <- 15.3
-    ncanoes <- sum(td$ncanoes)
-    nmotors <- sum(td$nmotors)
-    
-    tmp_canoe <- tmp[c("KG", "hours")][tmp$btype == 1, ]
-    monthlyCPUE_canoe <- aggregate(tmp_canoe, by = list(tmp$Month[tmp$btype == 1]), sum, drop = FALSE) 
-    monthlyCPUE_canoe <- monthlyCPUE_canoe$KG/monthlyCPUE_canoe$hours
-    monthlyCPUE_canoe[is.na(monthlyCPUE_canoe)] <- 0
-    natcatch_canoe <- monthlyCPUE_canoe * uepertrip_canoe * tripspermonth_canoe * ncanoes * 0.001
-    
-    tmp_motor <- tmp[c("KG", "hours")][tmp$btype == 2, ]
-    monthlyCPUE_motor <- aggregate(tmp_motor, by = list(tmp$Month[tmp$btype == 2]), sum, drop = FALSE) 
-    monthlyCPUE_motor <- monthlyCPUE_motor$KG/monthlyCPUE_motor$hours
-    monthlyCPUE_motor[is.na(monthlyCPUE_motor)] <- 0
-    natcatch_motor <- monthlyCPUE_motor * uepertrip_motor * tripspermonth_motor * nmotors * 0.001
-    
-    # tmp_shore <- tmp[c("KG", "hours")][tmp$btype == 3, ]
-    # monthlyCPUE_shore <- aggregate(tmp_shore, by = list(tmp$Month[tmp$btype == 3]), sum, drop = FALSE) 
-    # monthlyCPUE_shore <- monthlyCPUE_shore$KG/monthlyCPUE_shore$hours
-    # monthlyCPUE_shore[is.na(monthlyCPUE_shore)] <- 0
-    # natcatch_shore <- monthlyCPUE_shore * uepertrip_shore * tripspermonth_shore * nshores * 0.001
-    
-    # colnames(monthlyCPUE0)[1] <- "Date"
-    # monthlyCPUE0$CPUE <- monthlyCPUE0$KG/monthlyCPUE0$hours
-    # monthlyCPUE0$natcatch <- monthlyCPUE0$CPUE * uepertrip * tripspermonthperboat * nboats * 0.001
-    ## onlt nacatch used
-    ## in tonnes
-    
+    x$station <- stns$municipio[match(x$station, stns$station)]
+
     indices <- match(input$site, sites)
+    munis <- munis[indices, ]
     if(length(indices) == 0) return(NULL)
-    indices[indices == 19] <- 20
+    #indices[indices == 19] <- 20
     x <- x[x$station %in% indices, ]
-    indices <- match(input$hab, habs)
+    indices <- match(input$habitat, habitats)
     if(length(indices) == 0) return(NULL)
-    x <- x[x$hab %in% indices, ]
+    x <- x[x$habitat %in% indices, ]
     indices <- match(input$gear, gears)
     if(length(indices) == 0) return(NULL)
     indices <- unlist(list(c(1, 5, 7:11), 2:3, 4, 6)[indices], use.names = FALSE)
     x <- x[x$gear %in% indices, ]
+    indices <- match(input$boat_type, boat_types)
+    if(length(indices) == 0) return(NULL)
+    if(!(1L %in% indices)) munis$canoes <- 0
+    if(!(2L %in% indices)) munis$motors <- 0
+    x <- x[x$boat_type %in% indices, ]
     if(nrow(x) < 30) return(NULL)
 
     ## aggregate species first since not dependent on trip hours
     ## find national totals by month
-    
-    newx <- x
-    sppKG <- aggregate(newx["KG"], by = list(newx$species), sum)
+    ###########################################################
+    sppKG <- aggregate(x["KG"], by = list(x$species), sum)
     colnames(sppKG)[1] <- "species"
     sppKG <- sppKG[order(sppKG$KG, decreasing = TRUE), ]
-    if(nrow(sppKG) > 15){
+    if(nrow(sppKG) > 10){
       others <- sum(sppKG[seq(11, nrow(sppKG)), 2])
-      sppKG <- sppKG[1:15, ]
-      sppcodes <- readRDS("data/sppdata.rds")
-      tmpnms <- paste0(sppcodes$COMMON.NAME, " (", sppcodes$TETUN, ")")
-      sppKG$species <- tmpnms[match(sppKG$species, sppcodes$Code)]
-      OTHmatch <- grep("^OTHER", sppKG$species)
+      sppKG <- sppKG[1:10, ]
+      tmpnms <- paste0(spcs$category, " (", spcs$category_tetun, ")")
+      sppKG$species <- tmpnms[match(sppKG$species, spcs$species)]
+      OTHmatch <- grep("^Other", sppKG$species)
       if(length(OTHmatch) > 0){
         others <- others + sppKG$KG[OTHmatch[1]]
         sppKG <- sppKG[-(OTHmatch[1]), ]
       }
-      UNKmatch <- grep("^UNKNOWN", sppKG$species)
+      UNKmatch <- grep("^Unknown", sppKG$species)
       if(length(UNKmatch) > 0){
         others <- others + sppKG$KG[UNKmatch[1]]
         sppKG <- sppKG[-(UNKmatch[1]), ]
@@ -163,9 +161,11 @@ shinyServer(function(input, output, session){
       sppKG <- rbind(sppKG, aggrow)
     }
     sppKG$species <- factor(sppKG$species, levels = sppKG$species)
-    
+    sppKG$Tonnes <- sppKG$KG/1000
+    ######################################################################
+    newx <- x
     ## now need to aggregate trips
-    tmp <- aggregate(newx[c("Date", "pob", "hours", "station", "hab", "gear", "btype", "Month")], 
+    tmp <- aggregate(newx[c("Date", "pob", "hours", "station", "habitat", "gear", "boat_type", "Month")], 
                      by = list(newx$ID), "[", 1) 
     colnames(tmp)[1] <- "ID"
     tmp$KG <- aggregate(newx["KG"], by = list(newx$ID), sum)[, 2]
@@ -185,8 +185,37 @@ shinyServer(function(input, output, session){
     monthlyCPUE$CPUE[is.na(monthlyCPUE$CPUE)] <- 0
     monthlyCPUE$fishing_days[is.na(monthlyCPUE$fishing_days)] <- 0
     monthlyCPUE <- monthlyCPUE[c("Date", "fishing_days", "trips", "hours", "KG", "CPUE")]
-    monthlyCPUE$natcatch <- natcatch_canoe + natcatch_motor
+    ## calculate national catch
+    uepertrip_canoe <- 4 #4
+    uepertrip_motor <- 10
+    uepertrip_shore <- 3
+    tripspermonth_canoe <- 8.2
+    tripspermonth_motor <- 15.3
+    ncanoes <- sum(munis$canoes)
+    nmotors <- sum(munis$motors)
+    ## calculate canoe total catch
+    tmp_canoe <- tmp[c("KG", "hours")][tmp$boat_type == 1, ]
+    if(nrow(tmp_canoe) > 0){
+      monthlyCPUE_canoe <- aggregate(tmp_canoe, by = list(tmp$Month[tmp$boat_type == 1]), sum, drop = FALSE) 
+      monthlyCPUE_canoe <- monthlyCPUE_canoe$KG/monthlyCPUE_canoe$hours
+      monthlyCPUE_canoe[is.na(monthlyCPUE_canoe)] <- 0
+      natcatch_canoe <- monthlyCPUE_canoe * uepertrip_canoe * tripspermonth_canoe * ncanoes * 0.001
+    }else{
+      natcatch_canoe <- 0
+    }
 
+    ## calculate motor total catch
+    tmp_motor <- tmp[c("KG", "hours")][tmp$boat_type == 2, ]
+    if(nrow(tmp_motor) > 0){
+      monthlyCPUE_motor <- aggregate(tmp_motor, by = list(tmp$Month[tmp$boat_type == 2]), sum, drop = FALSE) 
+      monthlyCPUE_motor <- monthlyCPUE_motor$KG/monthlyCPUE_motor$hours
+      monthlyCPUE_motor[is.na(monthlyCPUE_motor)] <- 0
+      natcatch_motor <- monthlyCPUE_motor * uepertrip_motor * tripspermonth_motor * nmotors * 0.001
+    }else{
+      natcatch_motor <- 0
+    }
+    monthlyCPUE$natcatch <- natcatch_canoe + natcatch_motor
+    
     stationCPUE <- aggregate(newx[c("KG", "hours")], by = list(newx$Date, newx$station), sum, drop = TRUE)
     colnames(stationCPUE)[1:2] <- c("Date", "station")
     stationtab <- table(stationCPUE$station)
@@ -195,30 +224,34 @@ shinyServer(function(input, output, session){
     stationCPUE$Date <- as.Date(as.character(stationCPUE$Date)) ## factor not valid for plotting
     stationCPUE$CPUE <- stationCPUE$KG/stationCPUE$hours
     stationCPUE$station <- as.factor(sites[stationCPUE$station])
-    stationCPUE$fit <- NA_real_
-    for(i in unique(stationCPUE$station)){
-      mylogi <- stationCPUE$station == i
-      stationCPUE$fit[mylogi] <- smooth.spline(as.integer(stationCPUE$Date)[mylogi], stationCPUE$CPUE[mylogi], spar = input$smoothen)$y
+    stationCPUE$fit <- stationCPUE$CPUE
+    if(input$smoothen > 0){
+      for(i in unique(stationCPUE$station)){
+        mylogi <- stationCPUE$station == i
+        stationCPUE$fit[mylogi] <- smooth.spline(as.integer(stationCPUE$Date)[mylogi], 
+                                                 stationCPUE$CPUE[mylogi], spar = input$smoothen)$y
+      }
     }
     stationCPUE$fit[stationCPUE$fit < 0] <- 0
     
     
-    
-    #####newx$hab[newx$hab == 5] <- 2 ## merge traditional fad into fad for now
-    habCPUE <- aggregate(newx[c("KG", "hours")], by = list(newx$Date, newx$hab), sum, drop = TRUE)
-    colnames(habCPUE)[1:2] <- c("Date", "hab")
-    habtab <- table(habCPUE$hab)
-    discards <- as.integer(names(habtab)[habtab < 5])
-    habCPUE <- habCPUE[!habCPUE$hab %in% discards, ]
-    habCPUE$Date <- as.Date(as.character(habCPUE$Date)) ## factor not valid for plotting
-    habCPUE$CPUE <- habCPUE$KG/habCPUE$hours
-    habCPUE$hab <- as.factor(habs[habCPUE$hab])
-    habCPUE$fit <- NA_real_
-    for(i in unique(habCPUE$hab)){
-      mylogi <- habCPUE$hab == i
-      habCPUE$fit[mylogi] <- smooth.spline(as.integer(habCPUE$Date)[mylogi], habCPUE$CPUE[mylogi], spar = input$smoothen)$y
+    #####newx$habitat[newx$habitat == 5] <- 2 ## merge traditional fad into fad for now
+    habitatCPUE <- aggregate(newx[c("KG", "hours")], by = list(newx$Date, newx$habitat), sum, drop = TRUE)
+    colnames(habitatCPUE)[1:2] <- c("Date", "habitat")
+    habitattab <- table(habitatCPUE$habitat)
+    discards <- as.integer(names(habitattab)[habitattab < 5])
+    habitatCPUE <- habitatCPUE[!habitatCPUE$habitat %in% discards, ]
+    habitatCPUE$Date <- as.Date(as.character(habitatCPUE$Date)) ## factor not valid for plotting
+    habitatCPUE$CPUE <- habitatCPUE$KG/habitatCPUE$hours
+    habitatCPUE$habitat <- as.factor(habitats[habitatCPUE$habitat])
+    habitatCPUE$fit <- habitatCPUE$CPUE
+    if(input$smoothen > 0){
+      for(i in unique(habitatCPUE$habitat)){
+        mylogi <- habitatCPUE$habitat == i
+        habitatCPUE$fit[mylogi] <- smooth.spline(as.integer(habitatCPUE$Date)[mylogi], habitatCPUE$CPUE[mylogi], spar = input$smoothen)$y
+      }
     }
-    habCPUE$fit[habCPUE$fit < 0] <- 0
+    habitatCPUE$fit[habitatCPUE$fit < 0] <- 0
     
     
     gearCPUE <- aggregate(newx[c("KG", "hours")], by = list(newx$Date, newx$gear), sum, drop = TRUE)
@@ -229,16 +262,19 @@ shinyServer(function(input, output, session){
     gearCPUE$Date <- as.Date(as.character(gearCPUE$Date)) ## factor not valid for plotting
     gearCPUE$CPUE <- gearCPUE$KG/gearCPUE$hours
     gearCPUE$gear <- as.factor(gears[gearCPUE$gear])
-    gearCPUE$fit <- NA_real_
-    for(i in unique(gearCPUE$gear)){
-      mylogi <- gearCPUE$gear == i
-      gearCPUE$fit[mylogi] <- smooth.spline(as.integer(gearCPUE$Date)[mylogi], gearCPUE$CPUE[mylogi], spar = input$smoothen)$y
+    gearCPUE$fit <- gearCPUE$CPUE
+    if(input$smoothen > 0){
+      for(i in unique(gearCPUE$gear)){
+        mylogi <- gearCPUE$gear == i
+        gearCPUE$fit[mylogi] <- smooth.spline(as.integer(gearCPUE$Date)[mylogi], 
+                                              gearCPUE$CPUE[mylogi], spar = input$smoothen)$y
+      }
     }
     gearCPUE$fit[gearCPUE$fit < 0] <- 0
 
 
     return(list(monthlyCPUE = monthlyCPUE, stationCPUE = stationCPUE, 
-                habCPUE = habCPUE, gearCPUE = gearCPUE, sppKG = sppKG))
+                habitatCPUE = habitatCPUE, gearCPUE = gearCPUE, sppKG = sppKG))
   })
   output$plot1 <- renderPlot({
     CPUE <- datasetInput()
@@ -287,15 +323,15 @@ shinyServer(function(input, output, session){
   
   output$plot3 <- renderPlot({
     CPUE <- datasetInput()
-    habCPUE <- CPUE$habCPUE
-    if(is.null(habCPUE)){
+    habitatCPUE <- CPUE$habitatCPUE
+    if(is.null(habitatCPUE)){
       plot(0:1, 0:1, type = "n", axes = FALSE, ann = FALSE)
       legend("center", legend = "Insufficient data to plot\n", bty = "n")
       box()
       return(NULL)
     }
     
-    ggplot(data = habCPUE, aes(x = Date, y = fit, colour = hab)) +
+    ggplot(data = habitatCPUE, aes(x = Date, y = fit, colour = habitat)) +
       geom_point() +
       xlab("") +
       ylab("CPUE (kg/hour)") +
@@ -305,9 +341,9 @@ shinyServer(function(input, output, session){
                                             size = 0.5, linetype = "solid")) +
       scale_x_date(date_breaks = "1 month" , labels=date_format("%b-%Y"))
     
-    # habCPUE$hab <- as.factor(habs[habCPUE$hab])
-    # ggplot(data = habCPUE,
-    #        aes(x = Date, y = CPUE, colour = hab)) +
+    # habitatCPUE$habitat <- as.factor(habitats[habitatCPUE$habitat])
+    # ggplot(data = habitatCPUE,
+    #        aes(x = Date, y = CPUE, colour = habitat)) +
     #   geom_line()+
     #   xlab("") +
     #   ylab("CPUE (kg/hour)") +
@@ -360,10 +396,11 @@ shinyServer(function(input, output, session){
       box()
       return(NULL)
     }
-    ggplot(sppKG, aes(x="", y=KG, fill=species))+
+    ggplot(sppKG, aes(x="", y=Tonnes, fill=species))+
       geom_bar(width = 1, stat = "identity")+
       coord_polar("y", start=0)+
-      labs(title = "Catch by species (KG)", x = "", y = "")+
+      labs(title = "Catch by species (T)", x = "", y = "")+
+      scale_fill_brewer(palette="Paired") +
       theme_bw()
   })
   
@@ -412,13 +449,13 @@ shinyServer(function(input, output, session){
 # stationCPUE$CPUE[is.na(stationCPUE$CPUE)] <- 0
 
 
-# habCPUE <- aggregate(newx[c("KG", "hours")], by = list(newx$Month, newx$hab), sum, drop = FALSE)
-# colnames(habCPUE)[1:2] <- c("Date", "hab")
-# habCPUE$Date <- as.Date(as.character(habCPUE$Date)) ## factor not valid for plotting
-# habCPUE$CPUE <- habCPUE$KG/habCPUE$hours
-# habCPUE$KG[is.na(habCPUE$KG)] <- 0
-# habCPUE$hours[is.na(habCPUE$hours)] <- 0
-# habCPUE$CPUE[is.na(habCPUE$CPUE)] <- 0
+# habitatCPUE <- aggregate(newx[c("KG", "hours")], by = list(newx$Month, newx$habitat), sum, drop = FALSE)
+# colnames(habitatCPUE)[1:2] <- c("Date", "habitat")
+# habitatCPUE$Date <- as.Date(as.character(habitatCPUE$Date)) ## factor not valid for plotting
+# habitatCPUE$CPUE <- habitatCPUE$KG/habitatCPUE$hours
+# habitatCPUE$KG[is.na(habitatCPUE$KG)] <- 0
+# habitatCPUE$hours[is.na(habitatCPUE$hours)] <- 0
+# habitatCPUE$CPUE[is.na(habitatCPUE$CPUE)] <- 0
 # 
 # gearCPUE <- aggregate(newx[c("KG", "hours")], by = list(newx$Month, newx$gear), sum, drop = FALSE)
 # colnames(gearCPUE)[1:2] <- c("Date", "gear")
