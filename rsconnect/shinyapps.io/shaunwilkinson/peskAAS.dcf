@@ -1,0 +1,12 @@
+name: peskAAS
+title: peskAAS
+username:
+account: shaunwilkinson
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 930432
+bundleId: 2123223
+url: https://shaunwilkinson.shinyapps.io/peskAAS/
+when: 1559380562.85037
+asMultiple: FALSE
+asStatic: FALSE
