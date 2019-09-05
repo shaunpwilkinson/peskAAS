@@ -5,8 +5,8 @@ account: shaunwilkinson
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 930432
-bundleId: 2123223
+bundleId: 2290393
 url: https://shaunwilkinson.shinyapps.io/peskAAS/
-when: 1559380562.85037
+when: 1564973125.93287
 asMultiple: FALSE
 asStatic: FALSE

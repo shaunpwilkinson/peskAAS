@@ -3,6 +3,7 @@ library(shinyWidgets)
 library(leaflet)
 
 shinyUI(fluidPage(
+  tags$head(includeScript("google-analytics.js")),
   includeCSS("www/bootstrap.css"),
   theme = "bootstrap.css",
   shinyWidgets::setBackgroundImage(src = "rect.png"),
@@ -84,11 +85,11 @@ shinyUI(fluidPage(
                      startview = "year", language = "en-AU"#, weekstart = 1
            ),
            br(),
-           checkboxGroupInput("habitat", label = "Habitat",
+           checkboxGroupInput("habitat", label = "Habitat", # note traditional fad removed 20190830
                               choices = c("Reef/Ahu ruin","FAD/Rumpon","Deep/Tasi kle'an","Beach/Tasi ninin",
-                                          "Traditional FAD/Rumpon bamboo","Mangrove/Aiparapa","Gleaning/Meti"),
+                                          "Mangrove/Aiparapa","Gleaning/Meti"),
                               selected = c("Reef/Ahu ruin","FAD/Rumpon","Deep/Tasi kle'an","Beach/Tasi ninin",
-                                           "Traditional FAD/Rumpon bamboo","Mangrove/Aiparapa","Gleaning/Meti")),
+                                           "Mangrove/Aiparapa","Gleaning/Meti")),
            actionLink("selectall_habitat", "select/deselect all"), 
            br(),
            br(),
@@ -135,7 +136,7 @@ shinyUI(fluidPage(
            br(),
            br(),
            br(),
-           downloadButton("summaryTab.csv", "Download (csv)")
+           downloadButton("summaryTab", label = "Download (csv)")
            ),
     column(3, 
            br(),
