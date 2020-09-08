@@ -1,12 +1,8 @@
-################################################################################
-
-## note: first need to save a 2-element character vector with DB username 
-## and password as "data/dbcreds.rds" 
-
 library(shiny)
 library(shinyWidgets)
 library(labeling)
 library(RMySQL)
+library(leaflet)
 library(lubridate)
 library(ggplot2)
 library(leaflet)
@@ -16,19 +12,62 @@ library(RColorBrewer)
 library(scales)
 library(zoo)
 
-shinyServer(function(input, output, session){
+
+startdate <- lubridate::floor_date(Sys.Date() - lubridate::years(1), unit = "month")
+if(is.na(startdate)) startdate <- lubridate::floor_date(Sys.Date() - lubridate::days(1) - lubridate::years(1), unit = "month")
+
+
+server <- function(input, output, session) {
   shp_df <- readRDS("data/shape.rds")
   kobo_trips <- readRDS("data/trips.rds")
   kobo_landings <- readRDS("data/landings.rds")
   pds_trips <- readRDS("data/PDS_trips.rds")
   pds_points <- readRDS("data/PDS_points.rds")
+  
+  #################################################################################
+  # #### Nearest neighbor method validation test for data up until 31 July 2020 ####
+  # kobo_trips <- kobo_trips[as.Date(kobo_trips$date) < as.Date("2020-07-31"), ]
+  # kobo_landings <- kobo_landings[(kobo_landings$trip_id %in% kobo_trips$trip_id), ]
+  # pds_trips <- pds_trips[as.Date(pds_trips$date) < as.Date("2020-07-31"), ]
+  # linked_trips <- pds_trips[!is.na(pds_trips$trip_id), ]
+  # nrow(linked_trips) #926
+  # gear_success <- numeric(100L)
+  # habitat_success <- numeric(100L)
+  # set.seed(999)
+  # for(i in 1:100){
+  #   trainingtrips <- sample(seq_len(nrow(linked_trips)), size = round(nrow(linked_trips)*0.8))
+  #   trainingdata <- linked_trips[trainingtrips, ]
+  #   querydata <- linked_trips[!(seq_len(nrow(linked_trips)) %in% trainingtrips), ]
+  #   nnobj2 <- RANN::nn2(trainingdata[, 13:32], querydata[, 13:32], k = 1)
+  #   toofar <- nnobj2$nn.dists[, 1] > 0.2
+  #   nohab <- !querydata$habitat_code %in% trainingdata$habitat_code
+  #   nogear <- !querydata$gear_code %in% trainingdata$gear_code
+  #   keeps <- !toofar &  !nohab & !nogear ## remove 3 records
+  #   sum(keeps)
+  #   length(keeps)
+  #   querydata <- querydata[keeps, ]
+  #   nnobj2$nn.dists <- nnobj2$nn.dists[keeps, , drop = FALSE]
+  #   nnobj2$nn.idx <- nnobj2$nn.idx[keeps,  ,drop = FALSE]
+  #   gear_success[i] <- sum(querydata$gear_code== trainingdata$gear_code[nnobj2$nn.idx[, 1]])/nrow(querydata) #0.815
+  #   habitat_success[i] <- sum(querydata$habitat_code== trainingdata$habitat_code[nnobj2$nn.idx[, 1]])/nrow(querydata) #0.896
+  # }
+  # hist(gear_success)
+  # hist(habitat_success)
+  # mean(gear_success) # 0.8344741
+  # sd(gear_success) # 0.02283898
+  # mean(habitat_success) # 0.9194184
+  # sd(habitat_success) # 0.0214137
+  ###################################################################################
+  
   max_date_numeric_kobo <- max(kobo_trips$date_numeric)
   max_date_numeric_pds <- max(pds_trips$date_numeric)
-
+  
   dbcreds <- readRDS("data/dbcreds.rds")
   peskaDAT = RMySQL::dbConnect(RMySQL::MySQL(), user=dbcreds[1], password=dbcreds[2], 
                                dbname='wildrlab_peskaDB', host='johnny.heliohost.org', port=3306)
+  
 
+  
   munis <- RMySQL::dbReadTable(peskaDAT, "municipalities")
   stns <- RMySQL::dbReadTable(peskaDAT, "stations")
   spcs <-  RMySQL::dbReadTable(peskaDAT, "species")
@@ -46,8 +85,9 @@ shinyServer(function(input, output, session){
   
   pdstrps <- DBI::dbGetQuery(peskaDAT, q1)
   pdspts <- DBI::dbGetQuery(peskaDAT, q2)
-  
-  RMySQL::dbDisconnect(peskaDAT)
+
+
+
   
   trps <- rbind(kobo_trips, kobotrps)
   lndgs <- rbind(kobo_landings, kobolndgs)
@@ -59,31 +99,69 @@ shinyServer(function(input, output, session){
   pds_trips <- pds_trips[!duplicated(pds_trips), ]
   pds_points <- pds_points[!duplicated(pds_points), ]
   
+  
+  
+  ############ EXPORT UPDATED DATASETS TO /data REGULARLY TO SPEED THINGS UP #####################
+  # saveRDS(trps, file = "data/trips.rds")
+  # saveRDS(lndgs, file = "data/landings.rds")
+  # saveRDS(pds_trips, file = "data/PDS_trips.rds")
+  # saveRDS(pds_points, file = "data/PDS_points.rds")
+  # 
+  # ## also create backups
+  # tabs <- RMySQL::dbListTables(peskaDAT)
+  # sysdate <- Sys.Date()
+  # dir.create(paste0("~/Dropbox/East_Timor/Worldfish/peskAAS/backups/", sysdate))
+  # for(i in tabs){
+  #   tmp <- RMySQL::dbReadTable(peskaDAT, i)
+  #   saveRDS(tmp, file = paste0("~/Dropbox/East_Timor/Worldfish/peskAAS/backups/", sysdate, "/", i, ".rds"))
+  # }
+  ########################################################################################
+  
+  RMySQL::dbDisconnect(peskaDAT)
+  
+  
   pds_trips$date <- as.Date(pds_trips$date)
   # pds_trips$gear <- match(pds_trips$gear, c("GN", "HL", "LL", "SG", "CN", "MC", "BS", "SN", "TP"))
   pds_trips$habitat_code[pds_trips$habitat_code == 5L] <- 2L # lump trad fad in with normal fad
   pds_trips$habitat_code[pds_trips$habitat_code == 6L] <- 5L # shift others back 1 to enable matching
   pds_trips$habitat_code[pds_trips$habitat_code == 7L] <- 6L
-  discards <- is.na(pds_trips$boat_code)
-  discard_trips <- pds_trips$PDS_trip[discards]
+  discards <- is.na(pds_trips$boat_code) # logical
+  discard_trips <- pds_trips$PDS_trip[discards] #integer
   pds_trips <- pds_trips[!discards, ]
   pds_points <- pds_points[!(pds_points$PDS_trip %in% discard_trips), ]
   
+  ## apply max latitude filter
+  discard_points <- grepl("^-8.11", pds_points$latlng)
+  discard_trips <- unique(pds_points$PDS_trip[discard_points])
+  pds_trips <- pds_trips[!(pds_trips$PDS_trip %in% discard_trips), ]
+  pds_points <- pds_points[!(pds_points$PDS_trip %in% discard_trips), ]
+  
   # trps$gear_code <- match(trps$gear_code, c("GN", "HL", "LL", "SG", "CN", "MC", "BS", "SN", "TP"))
+  
+  # convert stations to municipalities
   trps$station_code <- stns$municipality_code[match(trps$station_code, stns$station_code)]
+  
+  # filter by trip duration/effort
   trps$trip_hours[trps$trip_hours == 0] <- 3
   trps$trip_hours[trps$trip_hours > 72] <- 72
   trps$trip_effort[trps$trip_effort == 0] <- 3
   trps$trip_effort[trps$trip_effort > 144] <- 144
+  
   trps$habitat_code[trps$habitat_code == 5L] <- 2L # lump trad fad in with normal fad
   trps$habitat_code[trps$habitat_code == 6L] <- 5L # shift others back 1 to enable matching
   trps$habitat_code[trps$habitat_code == 7L] <- 6L
   ## gear match must be before discard step
+  discards <- lndgs$trip_id[is.na(lndgs$species_code) | is.na(lndgs$length) | 
+                              is.na(lndgs$nfish) | is.na(lndgs$weight_g)| 
+                              is.na(lndgs$flag_code)]
+  trps <- trps[!(trps$trip_id %in% discards), ]
+  lndgs <- lndgs[!(lndgs$trip_id %in% discards), ]
+  
+  #discards <- lndgs$trip_id[lndgs$nfish > 10000] ## trip ids
   discards <- lndgs$trip_id[!(lndgs$flag_code %in% c(0L, 4L, 5L))]## trip ids
   trpnas <- is.na(trps$station_code) | is.na(trps$habitat_code) | is.na(trps$gear_code) | is.na(trps$trip_effort) #logical
   discards <- c(discards, trps$trip_id[trpnas])
-  lndnas <- is.na(lndgs$weight_g) 
-  discards <- c(discards, lndgs$trip_id[lndnas])
+
   trps$date <- as.Date(trps$date)
   datnas <- trps$date < as.Date("2016-09-01") | trps$date >= lubridate::floor_date(Sys.Date(), unit = "day")
   discards <- c(discards, trps$trip_id[datnas])
@@ -91,19 +169,37 @@ shinyServer(function(input, output, session){
   trps <- trps[!(trps$trip_id %in% discards), ]
   lndgs <- lndgs[!(lndgs$trip_id %in% discards), ]
   lndgs$KG <- lndgs$weight_g/1000
+  
   ## next 2 lines = 10x faster than aggregate
   tmp <- split(lndgs$KG, f = factor(lndgs$trip_id, levels = trps$trip_id), drop = FALSE)
   trps$KG <- vapply(tmp, sum, 0, USE.NAMES = FALSE)
+  
+  ## check for crazy CPUE values
+  cpues <- trps$KG/trps$trip_effort
+  discards <- trps$trip_id[cpues > 100]
+  trps <- trps[!(trps$trip_id %in% discards), ]
+  lndgs <- lndgs[!(lndgs$trip_id %in% discards), ]
+
+  
   ## date landings tab (day not month)
   tmp <- structure(trps$date, names = trps$trip_id)
   lndgs$date <- tmp[lndgs$trip_id]
   sites <- c("Viqueque","Lautem","Manatuto","Liquica","Bobonaro","Covalima",
              "Manufahi","Ainaro","Baucau","Dili","Oe-Cusse", "Atauro")   
   habitats <- c("Reef/Ahu ruin","FAD/Rumpon","Deep/Tasi kle'an","Beach/Tasi ninin",
-            "Mangrove/Aiparapa","Gleaning/Meti")
+                "Mangrove/Aiparapa","Gleaning/Meti")
   gears <- c("Gillnet/Redi","Handline/Hakail","Longline/Hakail naruk","Spear/Kilat","Cast net/Dai",
              "Manual/Meti","Beach seine/Redi tasi ninin", "Seine net/Lampara","Trap/Bubur")
   boat_types <- c("Canoe", "Motor")
+  
+  ## temp fix for Joctan 2020-02-05
+  trps$IMEI[trps$IMEI == 9376082 & trps$date_numeric > 17691L] <- "6738430"
+  ##
+  
+  # trps <- trps[trps$date < as.Date("2020-07-31"), ]
+  # lndgs <- lndgs[(lndgs$trip_id %in% trps$trip_id), ]
+  # pds_trips <- pds_trips[pds_trips$date < as.Date("2020-07-31"), ]
+  # 
   observe({
     if(input$selectall_habitat == 0){
       return(NULL)
@@ -148,11 +244,12 @@ shinyServer(function(input, output, session){
     # inpt <- list(site = input$site, startDate = input$startDate, endDate = input$endDate,
     #              habitat = input$habitat, gear = input$gear, boat_type = input$boat_type)
     # saveRDS(inpt, file = "~/Desktop/input.rds")
+    # input <- readRDS(file = "~/Desktop/input.rds")
     #####################################
     
     ## shape file
     shp_df2 <- shp_df
-    shp_df2$colr[shp_df2$id %in% input$site] <- "tomato"
+    shp_df2$colr[shp_df2$id %in% input$site] <- "cornflowerblue"
     ## select date range
     trps <- trps[trps$date > input$startDate & trps$date < input$endDate, ]
     pds_trips <- pds_trips[pds_trips$date > input$startDate & pds_trips$date < input$endDate, ]
@@ -342,7 +439,7 @@ shinyServer(function(input, output, session){
     m <- addMapPane(m, "background_map", zIndex = 410) 
     m <- addMapPane(m, "polygons", zIndex = 420)
     m <- addMapPane(m, "labels", zIndex = 430)
-    m <- addProviderTiles(m, providers$OpenStreetMap, options = pathOptions(pane = "background_map"))
+    m <- addProviderTiles(m, providers$Esri.WorldImagery, options = pathOptions(pane = "background_map"))
     if(!is.null(heat)){
       heat$counts <- round(log(heat$counts) + 1)
       pal <- colorBin("YlOrRd", domain = seq(0, max(heat$counts)))
@@ -351,7 +448,7 @@ shinyServer(function(input, output, session){
                          stroke = FALSE, fillOpacity = 1, color = pal(heat$counts),
                          options = pathOptions(pane = "polygons"))
     }
-
+    
     #m <- addProviderTiles(m, providers$Stamen.TonerLabels, options = pathOptions(pane = "labels"))
     m
   })
@@ -385,12 +482,12 @@ shinyServer(function(input, output, session){
             axis.title.y=element_blank(),
             legend.position="none",
             panel.background=element_blank(),
-            panel.border=element_rect(linetype = "solid", color = "black", size=1),
+            #panel.border=element_rect(linetype = "solid", color = "black", size=1),
             panel.grid.major=element_blank(),
             panel.grid.minor=element_blank(),
             plot.background=element_blank(),
             aspect.ratio=0.5)
-      #theme_void()
+    #theme_void()
     
     ### CPUE plot
     cpue <- ggplot() +
@@ -438,11 +535,11 @@ shinyServer(function(input, output, session){
     
     plot.with.inset <- ggdraw() +
       draw_plot(cpue) +
-      draw_plot(map, x = 0.55, y = 0.77, width = .4,  height = .2)
+      draw_plot(map, x = 0.1, y = 0.6, width = .6,  height = .3)
     
     grid.arrange(catch, effort, plot.with.inset, layout_matrix = rbind(c(1,3), 2:3))
     # obj <- datasetInput()
-
+    
   })
   
   output$plot2 <- renderPlot({
@@ -580,5 +677,123 @@ shinyServer(function(input, output, session){
       write.csv(monthlyCPUE, file, row.names = FALSE)
     }
   )
-})
+}
 
+
+
+
+ui <- fluidPage(
+  tags$head(includeScript("google-analytics.js")),
+  includeCSS("www/bootstrap.css"),
+  theme = "bootstrap.css",
+  shinyWidgets::setBackgroundImage(src = "rect.png"),
+  # tags$head(
+  #   tags$link(rel = "stylesheet", type = "text/css", href = "bootstrap.css")
+  # ),
+  titlePanel(h1("PeskAAS")),
+  titlePanel(h4("Automated Analytics System for Small Scale Fisheries in Timor-Leste", 
+                style="opacity:0.8; text-decoration: overline; line-height: 1.0;")),
+  titlePanel(h4("nothing", style="opacity:0;")),
+  
+  fluidRow(
+    column(1, #style = "background-color:gainsboro;",
+           br(),
+           dateInput('startDate',
+                     label = "Start date",
+                     value = startdate,
+                     min = as.Date("2016-09-01"), max = lubridate::floor_date(Sys.Date(), unit = "day"),
+                     format = "dd-M-yyyy",
+                     startview = "year", language = "en-AU"#, weekstart = 1
+           ),
+           br(),
+           checkboxGroupInput("site", label = "Location",
+                              choices = c("Viqueque","Lautem","Manatuto","Liquica",
+                                          "Bobonaro","Covalima", "Manufahi","Ainaro",
+                                          "Baucau","Dili","Oe-Cusse", "Atauro"), 
+                              selected = c("Viqueque","Lautem","Manatuto","Liquica",
+                                           "Bobonaro","Covalima", "Manufahi","Ainaro",
+                                           "Baucau","Dili","Oe-Cusse", "Atauro")),
+           actionLink("selectall_site", "select/deselect all"), 
+           br(),
+           br(),
+           checkboxGroupInput("boat_type", label = "Boat type",
+                              choices = c("Canoe", "Motor"), 
+                              selected = c("Canoe", "Motor")),
+           actionLink("selectall_boat_type", "select/deselect all"), 
+           br()
+    ),
+    column(2, #style = "background-color:gainsboro;",
+           br(),
+           dateInput('endDate',
+                     label = "End date",
+                     value = lubridate::floor_date(Sys.Date(), unit = "month") - lubridate::days(1),
+                     min = as.Date("2016-09-01"), max = lubridate::floor_date(Sys.Date(), unit = "day"),
+                     format = "dd-M-yyyy", width = "50%",
+                     startview = "year", language = "en-AU"#, weekstart = 1
+           ),
+           br(),
+           checkboxGroupInput("habitat", label = "Habitat", # note traditional fad removed 20190830
+                              choices = c("Reef/Ahu ruin","FAD/Rumpon","Deep/Tasi kle'an","Beach/Tasi ninin",
+                                          "Mangrove/Aiparapa","Gleaning/Meti"),
+                              selected = c("Reef/Ahu ruin","FAD/Rumpon","Deep/Tasi kle'an","Beach/Tasi ninin",
+                                           "Mangrove/Aiparapa","Gleaning/Meti")),
+           actionLink("selectall_habitat", "select/deselect all"), 
+           br(),
+           br(),
+           checkboxGroupInput("gear", label = "Gear type",
+                              choices = c("Gillnet/Redi","Handline/Hakail",
+                                          "Longline/Hakail naruk", "Spear/Kilat",
+                                          "Cast net/Dai","Manual/Meti",
+                                          "Beach seine/Redi tasi ninin",
+                                          "Seine net/Lampara","Trap/Bubur"), 
+                              selected = c("Gillnet/Redi","Handline/Hakail",
+                                           "Longline/Hakail naruk","Spear/Kilat",
+                                           "Cast net/Dai","Manual/Meti",
+                                           "Beach seine/Redi tasi ninin",
+                                           "Seine net/Lampara","Trap/Bubur")),
+           actionLink("selectall_gear", "select/deselect all"), 
+           br()
+    ),
+    column(9, 
+           mainPanel(
+             tabsetPanel(
+               tabPanel("Tracked activity", br(), leafletOutput("plot0")),
+               tabPanel("CPUE by Month", br(), plotOutput("plot1")),
+               tabPanel("CPUE by site", br(), plotOutput("plot2")),
+               tabPanel("CPUE by habitat", br(), plotOutput("plot3")),
+               tabPanel("CPUE by gear", br(), plotOutput("plot4")),
+               tabPanel("Catch by species", br(), plotOutput("plot5")),
+               tabPanel("Summary", br(), tableOutput("table1"))
+             ),
+             width = 12
+           )
+    )
+  ),
+  fluidRow(
+    column(1, 
+           sliderInput("smoothen", label = "Smoothness", min = 0, max = 1, value = 0),
+           br(),
+           br()
+    ),
+    column(1, 
+           br(),
+           br(),
+           br(),
+           downloadButton("summaryTab", label = "Download (csv)")
+    ),
+    column(3, 
+           br(),
+           br(),
+           br()
+    ),
+    column(7, 
+           br(),
+           img(src = "logos.png", height = 50, width = 500),
+           br()
+    )
+    
+  )
+)
+
+
+shinyApp(ui = ui, server = server)
