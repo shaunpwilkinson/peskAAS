@@ -1,5 +1,9 @@
-
 PESKAAS: fisheries automated analytics system
+
+> **⚠ WARNING:**    
+> The development of Peskas for Timor-Leste has been moved. The data pipeline is now currently developed at https://github.com/WorldFishCenter/peskas.timor.data.pipeline. The [Timor-Leste fisheries analytics portal](https://timor.peskas.org) is now at  https://github.com/WorldFishCenter/peskas.timor.portal.
+
+This repository contains the application code as published in "PeskAAS: A near-real-time, open-source monitoring and analytics system for small-scale fisheries. PloS One, 15(11), e0234760." 
 
     Copyright (C) 2020 WorldFish
 
